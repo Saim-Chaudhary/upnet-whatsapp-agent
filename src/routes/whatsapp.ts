@@ -8,7 +8,7 @@ import {
   getConversation,
   resetConversation,
 } from "../agent/conversation.js";
-import { decideNextStep } from "../agent/workflow.js";
+import { decideNextStep, detectIntent } from "../agent/workflow.js";
 
 async function whatsappRoutes(app: FastifyInstance) {
   app.post("/webhook/whatsapp", async (request) => {
@@ -49,9 +49,15 @@ async function processMessage(message: any) {
   const currentStage = conversation.stage;
   conversation.messages.push(userMessage);
 
+  const intent = currentStage === "initial"
+    ? detectIntent(message.body)
+    : undefined;
   const decision = decideNextStep(currentStage, message.body);
   conversation.stage = decision.nextStage;
 
+  if (intent) {
+    console.log("Intent:", intent);
+  }
   console.log("Stage:", currentStage);
   console.log("Customer:", message.body);
   console.log("Next stage:", decision.nextStage);

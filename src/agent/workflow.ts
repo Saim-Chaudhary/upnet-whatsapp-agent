@@ -5,12 +5,71 @@ export type WorkflowDecision = {
   instruction: string;
 };
 
+export type CustomerIntent =
+  | "greeting"
+  | "internet_complaint"
+  | "other"
+  | "unclear";
+
 function normalize(message: string): string {
-  return message.toLowerCase().replace(/[.!?,]/g, " ");
+  return message.toLowerCase().replace(/[.!?,]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function hasAny(message: string, phrases: string[]): boolean {
   return phrases.some((phrase) => message.includes(phrase));
+}
+
+function hasWord(message: string, words: string[]): boolean {
+  return words.some((word) => new RegExp(`\\b${word}\\b`).test(message));
+}
+
+export function detectIntent(customerMessage: string): CustomerIntent {
+  const message = normalize(customerMessage);
+  const greeting = hasWord(message, [
+    "hi",
+    "hello",
+    "hey",
+  ]) || hasAny(message, [
+    "salam",
+    "assalam o alaikum",
+    "assalamu alaikum",
+    "good morning",
+    "good evening",
+    "how are you",
+  ]);
+  const internetComplaint = hasAny(message, [
+    "internet",
+    "wifi",
+    "wi fi",
+    "net ",
+    "net down",
+    "broadband",
+  ]) && hasAny(message, [
+    "not",
+    "nahi",
+    "ni ",
+    "problem",
+    "issue",
+    "down",
+    "slow",
+    "kaam nahi",
+    "kam nahi",
+    "chl",
+    "chal",
+    "work",
+    "connect",
+    "band",
+  ]);
+
+  if (internetComplaint) {
+    return "internet_complaint";
+  }
+
+  if (greeting && message.split(" ").length <= 6) {
+    return "greeting";
+  }
+
+  return greeting ? "unclear" : "other";
 }
 
 export function decideNextStep(
@@ -20,6 +79,24 @@ export function decideNextStep(
   const message = normalize(customerMessage);
 
   if (stage === "initial") {
+    const intent = detectIntent(customerMessage);
+
+    if (intent === "greeting") {
+      return {
+        nextStage: "initial",
+        instruction:
+          "Greet the customer warmly, welcome them to Upnet Internet support, and ask how you can help. Do not start troubleshooting or ask about router lights.",
+      };
+    }
+
+    if (intent !== "internet_complaint") {
+      return {
+        nextStage: "initial",
+        instruction:
+          "Ask the customer what help they need with Upnet Internet. Do not start troubleshooting until they describe an internet problem.",
+      };
+    }
+
     return {
       nextStage: "router_check",
       instruction:
