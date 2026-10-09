@@ -2,13 +2,8 @@ import "dotenv/config";
 
 import { FastifyInstance } from "fastify";
 import axios from "axios";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { upnetAgent } from "../agent/upnetAgent.js";
-import {
-  getConversation,
-  resetConversation,
-} from "../agent/conversation.js";
-import { decideNextStep, detectIntent } from "../agent/workflow.js";
+import { resetConversation } from "../agent/conversation.js";
+import { handleAgentMessage } from "../agent/service.js";
 
 async function whatsappRoutes(app: FastifyInstance) {
   app.post("/webhook/whatsapp", async (request) => {
@@ -19,7 +14,7 @@ async function whatsappRoutes(app: FastifyInstance) {
     console.log("ChatId:", message.chatId);
     console.log("Body:", message.body);
 
-    processMessage(message).catch((error) => {
+    processWhatsAppMessage(message).catch((error) => {
       console.error("Message processing failed:", error);
     });
 
@@ -41,55 +36,12 @@ async function whatsappRoutes(app: FastifyInstance) {
   );
 }
 
-async function processMessage(message: any) {
+async function processWhatsAppMessage(message: any) {
   const chatId = message.chatId || message.from;
-  const userMessage = new HumanMessage(message.body);
-
-  const conversation = getConversation(chatId);
-  const currentStage = conversation.stage;
-  conversation.messages.push(userMessage);
-
-  const intent = currentStage === "initial"
-    ? detectIntent(message.body)
-    : undefined;
-  const decision = decideNextStep(currentStage, message.body);
-  conversation.stage = decision.nextStage;
-
-  if (intent) {
-    console.log("Intent:", intent);
-  }
-  console.log("Stage:", currentStage);
-  console.log("Customer:", message.body);
-  console.log("Next stage:", decision.nextStage);
-
-  const result = await upnetAgent.invoke({
-    messages: [
-      new SystemMessage(`
-Follow the application-controlled workflow instruction below.
-Use English or Roman Urdu naturally, keep the response short for WhatsApp,
-ask only the requested question, and do not skip ahead in the workflow.
-
-Workflow instruction:
-${decision.instruction}
-      `),
-      ...conversation.messages,
-    ],
-  });
-
-  const response = result.messages.at(-1);
-
-  if (!response) {
-    throw new Error("Agent returned no response");
-  }
-
-  const reply =
-    typeof response.content === "string"
-      ? response.content
-      : JSON.stringify(response.content);
+  const result = await handleAgentMessage(chatId, message.body);
+  const reply = result.reply;
 
   console.log("AI Reply:", reply);
-
-  conversation.messages.push(response);
 
   const sendResponse = await axios.post(
     `${process.env.OPENWA_URL}/api/sessions/${process.env.OPENWA_SESSION_ID}/messages/send-text`,

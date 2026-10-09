@@ -1,18 +1,6 @@
-import Fastify from "fastify";
-import whatsappRoutes  from "./routes/whatsapp.js";
+import { buildApp } from "./app.js";
 
-const app = Fastify({
-  logger: true,
-});
-
-app.get("/health", async () => {
-  return {
-    status: "ok",
-    service: "upnet-whatsapp-agent",
-  };
-});
-
-app.register(whatsappRoutes);
+const app = buildApp();
 
 const start = async () => {
   try {

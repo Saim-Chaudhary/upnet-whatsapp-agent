@@ -8,6 +8,7 @@ export type WorkflowDecision = {
 export type CustomerIntent =
   | "greeting"
   | "internet_complaint"
+  | "service_status"
   | "other"
   | "unclear";
 
@@ -37,6 +38,22 @@ export function detectIntent(customerMessage: string): CustomerIntent {
     "good evening",
     "how are you",
   ]);
+  const serviceStatus = hasAny(message, [
+    "internet is working",
+    "internet working",
+    "internet works",
+    "internet fine",
+    "internet theek",
+    "net is working",
+    "net working",
+    "net fine",
+    "net theek",
+    "wifi working",
+    "wifi fine",
+    "wifi theek",
+    "everything is fine",
+    "sab theek",
+  ]);
   const internetComplaint = hasAny(message, [
     "internet",
     "wifi",
@@ -60,6 +77,10 @@ export function detectIntent(customerMessage: string): CustomerIntent {
     "connect",
     "band",
   ]);
+
+  if (serviceStatus) {
+    return "service_status";
+  }
 
   if (internetComplaint) {
     return "internet_complaint";
@@ -89,6 +110,14 @@ export function decideNextStep(
       };
     }
 
+    if (intent === "service_status") {
+      return {
+        nextStage: "resolved",
+        instruction:
+          "Acknowledge that the customer's internet is working or fine and close the service-status conversation politely. Do not ask about router lights.",
+      };
+    }
+
     if (intent !== "internet_complaint") {
       return {
         nextStage: "initial",
@@ -106,7 +135,7 @@ export function decideNextStep(
 
   if (stage === "router_check") {
     if (
-      hasAny(message, [
+      (hasWord(message, ["no"]) || hasAny(message, [
         "all green",
         "sab green",
         "lights green",
@@ -114,7 +143,7 @@ export function decideNextStep(
         "red nahi",
         "red light nahi",
         "green hain",
-      ])
+      ]))
     ) {
       return {
         nextStage: "restart_router",
@@ -142,6 +171,10 @@ export function decideNextStep(
     if (
       hasAny(message, [
         "restart kar diya",
+        "already restarted",
+        "already rebooted",
+        "pehle restart",
+        "restart kar chuka",
         "restarted",
         "restart done",
         "rebooted",
@@ -166,26 +199,6 @@ export function decideNextStep(
   if (stage === "internet_status") {
     if (
       hasAny(message, [
-        "working",
-        "chal raha",
-        "chal rha",
-        "aa raha",
-        "aa rha",
-        "theek ho gaya",
-        "it works",
-        "yes",
-        "haan",
-      ])
-    ) {
-      return {
-        nextStage: "resolved",
-        instruction:
-          "The internet is working again. Close the complaint politely in one short WhatsApp message.",
-      };
-    }
-
-    if (
-      hasAny(message, [
         "not working",
         "still not",
         "doesn't work",
@@ -201,6 +214,26 @@ export function decideNextStep(
         nextStage: "billing_check",
         instruction:
           "The restart did not fix the issue. Ask whether the internet bill is paid.",
+      };
+    }
+
+    if (
+      hasAny(message, [
+        "working",
+        "chal raha",
+        "chal rha",
+        "aa raha",
+        "aa rha",
+        "theek ho gaya",
+        "it works",
+        "yes",
+        "haan",
+      ])
+    ) {
+      return {
+        nextStage: "resolved",
+        instruction:
+          "The internet is working again. Close the complaint politely in one short WhatsApp message.",
       };
     }
 
@@ -226,7 +259,7 @@ export function decideNextStep(
       return {
         nextStage: "payment_required",
         instruction:
-          "Explain politely that the unpaid bill must be paid before further troubleshooting, and stop the workflow without asking another troubleshooting question.",
+          "Explain politely that the unpaid bill must be paid using an official UpNet payment method. Do not invent or provide a payment link, account number, or payment details. Ask the customer to contact support again after payment. Do not request payment proof before they confirm payment.",
       };
     }
 
@@ -260,7 +293,7 @@ export function decideNextStep(
       return {
         nextStage: "ready_for_ticket",
         instruction:
-          "Thank the customer for the payment proof and tell them the complaint will be forwarded to the technical team. Do not claim that a ticket has already been created.",
+          "Acknowledge that the customer says they sent a payment receipt or screenshot. Do not claim that the payment was verified, a ticket was created, or the complaint was forwarded. Explain briefly that verification or forwarding is not available in this chat yet.",
       };
     }
 
@@ -275,7 +308,7 @@ export function decideNextStep(
     return {
       nextStage: "ready_for_ticket",
       instruction:
-        "Tell the customer briefly that their complaint is ready to be forwarded to the technical team and that no further action is needed right now.",
+        "Acknowledge the customer's payment-proof message briefly. Do not claim that payment was verified, a ticket was created, or a complaint was forwarded. Explain that those actions are not available in this chat yet.",
     };
   }
 
