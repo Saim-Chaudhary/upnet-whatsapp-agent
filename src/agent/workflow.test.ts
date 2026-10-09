@@ -53,11 +53,16 @@ test("handles billing and payment-proof follow-ups", () => {
   );
 });
 
-test("keeps an unpaid bill from continuing troubleshooting", () => {
-  assert.equal(
-    decideNextStep("billing_check", "Bill abhi paid nahi hai").nextStage,
-    "payment_required",
-  );
+test("gives neutral official-payment guidance for an unpaid bill", () => {
+  const decision = decideNextStep("billing_check", "Bill not paid");
+
+  assert.equal(decision.nextStage, "payment_required");
+  assert.match(decision.instruction, /official UpNet payment method/i);
+  assert.match(decision.instruction, /contact support again after payment/i);
+  assert.match(decision.instruction, /Do not request payment proof/i);
+  assert.match(decision.instruction, /Do not say .*definitely caused/i);
+  assert.match(decision.instruction, /all troubleshooting must stop/i);
+  assert.doesNotMatch(decision.instruction, /before troubleshooting can continue/i);
 });
 
 test("recognizes unrelated requests without starting troubleshooting", () => {

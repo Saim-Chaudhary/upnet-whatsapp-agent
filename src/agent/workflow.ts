@@ -259,7 +259,7 @@ export function decideNextStep(
       return {
         nextStage: "payment_required",
         instruction:
-          "Explain politely that the unpaid bill must be paid using an official UpNet payment method. Do not invent or provide a payment link, account number, or payment details. Ask the customer to contact support again after payment. Do not request payment proof before they confirm payment.",
+          "Acknowledge that the customer says the bill is unpaid. Politely suggest paying through an official UpNet payment method, without inventing or providing a payment link, account number, or other payment details. Ask the customer to contact support again after payment. Do not request payment proof before the customer confirms payment. Do not say that the unpaid bill definitely caused the internet issue or that all troubleshooting must stop.",
       };
     }
 
@@ -316,7 +316,7 @@ export function decideNextStep(
     return {
       nextStage: "payment_required",
       instruction:
-        "Repeat politely that payment of the outstanding bill is required before troubleshooting can continue.",
+        "Remind the customer politely that they can pay through an official UpNet payment method and contact support again after payment. Do not invent payment details, request payment proof before payment is confirmed, claim that the bill definitely caused the issue, or say that all troubleshooting must stop.",
     };
   }
 

@@ -90,10 +90,20 @@ test("handles paid and unpaid billing outcomes honestly", async () => {
   assert.equal(paid.stage, "payment_proof");
   assert.equal(proof.stage, "ready_for_ticket");
   assert.equal(unpaid.stage, "payment_required");
-  assert.match(instructions.at(-1) ?? "", /official UpNet payment method/i);
+  const unpaidInstruction = instructions.at(-1) ?? "";
+  assert.match(unpaidInstruction, /official UpNet payment method/i);
+  assert.match(unpaidInstruction, /contact support again after payment/i);
   assert.doesNotMatch(
-    instructions.at(-1) ?? "",
+    unpaidInstruction,
     /ask (the customer )?(to )?(send|provide).*proof/i,
+  );
+  assert.match(
+    unpaidInstruction,
+    /Do not say that the unpaid bill definitely caused the internet issue/i,
+  );
+  assert.match(
+    unpaidInstruction,
+    /or that all troubleshooting must stop/i,
   );
   assert.match(
     instructions.find((instruction) => instruction.includes("not available in this chat yet")) ?? "",
