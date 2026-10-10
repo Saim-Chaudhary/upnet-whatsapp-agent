@@ -9,98 +9,95 @@ export type CustomerIntent =
   | "greeting"
   | "internet_complaint"
   | "service_status"
-  | "other"
-  | "unclear";
+  | "router_red_light"
+  | "router_no_red_light"
+  | "restart_completed"
+  | "internet_working"
+  | "internet_not_working"
+  | "bill_paid"
+  | "bill_unpaid"
+  | "payment_proof_sent"
+  | "payment_proof_pending"
+  | "unclear"
+  | "other";
 
-function normalize(message: string): string {
-  return message.toLowerCase().replace(/[.!?,]/g, " ").replace(/\s+/g, " ").trim();
-}
+export type IntentConfidence = "high" | "medium" | "low";
 
-function hasAny(message: string, phrases: string[]): boolean {
-  return phrases.some((phrase) => message.includes(phrase));
-}
+export type ClassifiedIntent = {
+  intent: CustomerIntent;
+  confidence: IntentConfidence;
+};
 
-function hasWord(message: string, words: string[]): boolean {
-  return words.some((word) => new RegExp(`\\b${word}\\b`).test(message));
-}
+const intents = new Set<CustomerIntent>([
+  "greeting",
+  "internet_complaint",
+  "service_status",
+  "router_red_light",
+  "router_no_red_light",
+  "restart_completed",
+  "internet_working",
+  "internet_not_working",
+  "bill_paid",
+  "bill_unpaid",
+  "payment_proof_sent",
+  "payment_proof_pending",
+  "unclear",
+  "other",
+]);
 
-export function detectIntent(customerMessage: string): CustomerIntent {
-  const message = normalize(customerMessage);
-  const greeting = hasWord(message, [
-    "hi",
-    "hello",
-    "hey",
-  ]) || hasAny(message, [
-    "salam",
-    "assalam o alaikum",
-    "assalamu alaikum",
-    "good morning",
-    "good evening",
-    "how are you",
-  ]);
-  const serviceStatus = hasAny(message, [
-    "internet is working",
-    "internet working",
-    "internet works",
-    "internet fine",
-    "internet theek",
-    "net is working",
-    "net working",
-    "net fine",
-    "net theek",
-    "wifi working",
-    "wifi fine",
-    "wifi theek",
-    "everything is fine",
-    "sab theek",
-  ]);
-  const internetComplaint = hasAny(message, [
-    "internet",
-    "wifi",
-    "wi fi",
-    "net ",
-    "net down",
-    "broadband",
-  ]) && hasAny(message, [
-    "not",
-    "nahi",
-    "ni ",
-    "problem",
-    "issue",
-    "down",
-    "slow",
-    "kaam nahi",
-    "kam nahi",
-    "chl",
-    "chal",
-    "work",
-    "connect",
-    "band",
-  ]);
+const confidences = new Set<IntentConfidence>(["high", "medium", "low"]);
 
-  if (serviceStatus) {
-    return "service_status";
+export function isClassifiedIntent(value: unknown): value is ClassifiedIntent {
+  if (!value || typeof value !== "object") {
+    return false;
   }
 
-  if (internetComplaint) {
-    return "internet_complaint";
-  }
+  const candidate = value as { intent?: unknown; confidence?: unknown };
+  return (
+    typeof candidate.intent === "string" &&
+    intents.has(candidate.intent as CustomerIntent) &&
+    typeof candidate.confidence === "string" &&
+    confidences.has(candidate.confidence as IntentConfidence)
+  );
+}
 
-  if (greeting && message.split(" ").length <= 6) {
-    return "greeting";
-  }
+export function isIntentAllowedForStage(
+  stage: ConversationStage,
+  intent: CustomerIntent,
+): boolean {
+  const allowed: Record<ConversationStage, CustomerIntent[]> = {
+    initial: ["greeting", "internet_complaint", "service_status", "other", "unclear"],
+    router_check: ["router_red_light", "router_no_red_light", "unclear"],
+    restart_router: ["restart_completed", "unclear"],
+    internet_status: ["internet_working", "internet_not_working", "unclear"],
+    billing_check: ["bill_paid", "bill_unpaid", "unclear"],
+    payment_proof: ["payment_proof_sent", "payment_proof_pending", "unclear"],
+    ready_for_ticket: [
+      "payment_proof_sent",
+      "payment_proof_pending",
+      "unclear",
+    ],
+    resolved: ["unclear", "other"],
+    payment_required: ["unclear", "other"],
+  };
 
-  return greeting ? "unclear" : "other";
+  return allowed[stage].includes(intent);
 }
 
 export function decideNextStep(
   stage: ConversationStage,
-  customerMessage: string,
+  classification: ClassifiedIntent,
 ): WorkflowDecision {
-  const message = normalize(customerMessage);
+  if (!isIntentAllowedForStage(stage, classification.intent)) {
+    return {
+      nextStage: stage,
+      instruction:
+        "The answer does not match the current question. Ask the customer to answer the current question clearly without advancing the workflow.",
+    };
+  }
 
   if (stage === "initial") {
-    const intent = detectIntent(customerMessage);
+    const intent = classification.intent;
 
     if (intent === "greeting") {
       return {
@@ -110,7 +107,7 @@ export function decideNextStep(
       };
     }
 
-    if (intent === "service_status") {
+    if (intent === "service_status" || intent === "internet_working") {
       return {
         nextStage: "resolved",
         instruction:
@@ -134,17 +131,7 @@ export function decideNextStep(
   }
 
   if (stage === "router_check") {
-    if (
-      (hasWord(message, ["no"]) || hasAny(message, [
-        "all green",
-        "sab green",
-        "lights green",
-        "no red",
-        "red nahi",
-        "red light nahi",
-        "green hain",
-      ]))
-    ) {
+    if (classification.intent === "router_no_red_light") {
       return {
         nextStage: "restart_router",
         instruction:
@@ -152,7 +139,7 @@ export function decideNextStep(
       };
     }
 
-    if (hasAny(message, ["red", "blinking red", "problem light", "los light"])) {
+    if (classification.intent === "router_red_light") {
       return {
         nextStage: "restart_router",
         instruction:
@@ -168,20 +155,7 @@ export function decideNextStep(
   }
 
   if (stage === "restart_router") {
-    if (
-      hasAny(message, [
-        "restart kar diya",
-        "already restarted",
-        "already rebooted",
-        "pehle restart",
-        "restart kar chuka",
-        "restarted",
-        "restart done",
-        "rebooted",
-        "kar diya",
-        "done",
-      ])
-    ) {
+    if (classification.intent === "restart_completed") {
       return {
         nextStage: "internet_status",
         instruction:
@@ -197,19 +171,7 @@ export function decideNextStep(
   }
 
   if (stage === "internet_status") {
-    if (
-      hasAny(message, [
-        "not working",
-        "still not",
-        "doesn't work",
-        "doesnt work",
-        "nahi chal",
-        "nahi aa",
-        "abhi bhi",
-        "no",
-        "nahi",
-      ])
-    ) {
+    if (classification.intent === "internet_not_working") {
       return {
         nextStage: "billing_check",
         instruction:
@@ -217,19 +179,7 @@ export function decideNextStep(
       };
     }
 
-    if (
-      hasAny(message, [
-        "working",
-        "chal raha",
-        "chal rha",
-        "aa raha",
-        "aa rha",
-        "theek ho gaya",
-        "it works",
-        "yes",
-        "haan",
-      ])
-    ) {
+    if (classification.intent === "internet_working") {
       return {
         nextStage: "resolved",
         instruction:
@@ -245,17 +195,7 @@ export function decideNextStep(
   }
 
   if (stage === "billing_check") {
-    if (
-      hasAny(message, [
-        "not paid",
-        "unpaid",
-        "pending",
-        "due",
-        "paid nahi",
-        "nahi paid",
-        "bill nahi diya",
-      ])
-    ) {
+    if (classification.intent === "bill_unpaid") {
       return {
         nextStage: "payment_required",
         instruction:
@@ -263,7 +203,7 @@ export function decideNextStep(
       };
     }
 
-    if (hasAny(message, ["paid", "payment done", "pay kar diya", "haan"])) {
+    if (classification.intent === "bill_paid") {
       return {
         nextStage: "payment_proof",
         instruction:
@@ -279,17 +219,7 @@ export function decideNextStep(
   }
 
   if (stage === "payment_proof") {
-    if (
-      hasAny(message, [
-        "screenshot",
-        "proof",
-        "receipt",
-        " bhej",
-        "send kar",
-        "attached",
-        "attach",
-      ])
-    ) {
+    if (classification.intent === "payment_proof_sent") {
       return {
         nextStage: "ready_for_ticket",
         instruction:

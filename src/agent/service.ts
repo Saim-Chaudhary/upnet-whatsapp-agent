@@ -1,7 +1,17 @@
-import { HumanMessage, SystemMessage, BaseMessage } from "@langchain/core/messages";
-import { upnetAgent } from "./upnetAgent.js";
+import { AIMessage, HumanMessage, SystemMessage, BaseMessage } from "@langchain/core/messages";
+import {
+  classifyIntent,
+  IntentClassificationInput,
+  IntentClassifier,
+  upnetAgent,
+} from "./upnetAgent.js";
 import { getConversation } from "./conversation.js";
-import { decideNextStep, detectIntent } from "./workflow.js";
+import {
+  ClassifiedIntent,
+  decideNextStep,
+  isClassifiedIntent,
+  isIntentAllowedForStage,
+} from "./workflow.js";
 
 export type AgentInvocation = (
   messages: BaseMessage[],
@@ -10,6 +20,13 @@ export type AgentInvocation = (
 async function invokeUpnetAgent(messages: BaseMessage[]) {
   return upnetAgent.invoke({ messages });
 }
+
+const clarificationReply =
+  "I'm sorry, I did not understand that. Please answer the current question clearly so I can help.";
+
+// These are routing labels, not calibrated probabilities. Low-confidence
+// classifications are not allowed to change the workflow.
+const acceptedConfidence = new Set(["high", "medium"]);
 
 export type AgentReply = {
   conversationId: string;
@@ -21,18 +38,38 @@ export async function handleAgentMessage(
   conversationId: string,
   message: string,
   invoke: AgentInvocation = invokeUpnetAgent,
+  classify: IntentClassifier = classifyIntent,
 ): Promise<AgentReply> {
   const conversation = getConversation(conversationId);
   const currentStage = conversation.stage;
-  const intent = currentStage === "initial" ? detectIntent(message) : undefined;
-  const decision = decideNextStep(currentStage, message);
+  const classificationInput: IntentClassificationInput = {
+    stage: currentStage,
+    latestMessage: message,
+    recentMessages: [...conversation.messages],
+  };
+  let classification: ClassifiedIntent;
+
+  try {
+    classification = await classify(classificationInput);
+  } catch (error) {
+    console.error("Intent classification failed:", error);
+    return storeSafeReply(conversationId, conversation, message);
+  }
+
+  if (
+    !isClassifiedIntent(classification) ||
+    classification.intent === "unclear" ||
+    !acceptedConfidence.has(classification.confidence) ||
+    !isIntentAllowedForStage(currentStage, classification.intent)
+  ) {
+    return storeSafeReply(conversationId, conversation, message);
+  }
+
+  const decision = decideNextStep(currentStage, classification);
 
   conversation.messages.push(new HumanMessage(message));
-  conversation.stage = decision.nextStage;
 
-  if (intent) {
-    console.log("Intent:", intent);
-  }
+  console.log("Intent:", classification.intent);
   console.log("Stage:", currentStage);
   console.log("Customer:", message);
   console.log("Next stage:", decision.nextStage);
@@ -63,10 +100,26 @@ ${decision.instruction}
       : JSON.stringify(response.content);
 
   conversation.messages.push(response);
+  conversation.stage = decision.nextStage;
 
   return {
     conversationId,
     reply,
+    stage: conversation.stage,
+  };
+}
+
+function storeSafeReply(
+  conversationId: string,
+  conversation: ReturnType<typeof getConversation>,
+  message: string,
+): AgentReply {
+  conversation.messages.push(new HumanMessage(message));
+  conversation.messages.push(new AIMessage(clarificationReply));
+
+  return {
+    conversationId,
+    reply: clarificationReply,
     stage: conversation.stage,
   };
 }

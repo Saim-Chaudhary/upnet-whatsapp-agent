@@ -1,7 +1,15 @@
-import { SystemMessage } from "@langchain/core/messages";
+import { BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { StateGraph, MessagesAnnotation } from "@langchain/langgraph";
 import { initChatModel } from "langchain";
+import { z } from "zod";
 import dotenv from "dotenv";
+import {
+  ClassifiedIntent,
+  CustomerIntent,
+  IntentConfidence,
+  isClassifiedIntent,
+} from "./workflow.js";
+import { ConversationStage } from "./conversation.js";
 
 dotenv.config();
 
@@ -10,6 +18,95 @@ const model = await initChatModel("openai/gpt-oss-20b", {
   modelProvider: "groq",
   temperature: 0,
 });
+
+const intentSchema = z.object({
+  intent: z.enum([
+    "greeting",
+    "internet_complaint",
+    "service_status",
+    "router_red_light",
+    "router_no_red_light",
+    "restart_completed",
+    "internet_working",
+    "internet_not_working",
+    "bill_paid",
+    "bill_unpaid",
+    "payment_proof_sent",
+    "payment_proof_pending",
+    "unclear",
+    "other",
+  ]),
+  confidence: z.enum(["high", "medium", "low"]),
+});
+
+export type IntentClassificationInput = {
+  stage: ConversationStage;
+  latestMessage: string;
+  recentMessages: BaseMessage[];
+};
+
+export type IntentClassifier = (
+  input: IntentClassificationInput,
+) => Promise<ClassifiedIntent>;
+
+const structuredIntentModel = model.withStructuredOutput(intentSchema);
+
+function formatRecentMessages(messages: BaseMessage[]): string {
+  return messages
+    .slice(-6)
+    .map((message) => {
+      const role =
+        message.getType() === "human"
+          ? "Customer"
+          : message.getType() === "ai"
+            ? "Assistant"
+            : "System";
+      return `${role}: ${String(message.content)}`;
+    })
+    .join("\n");
+}
+
+export const classifyIntent: IntentClassifier = async ({
+  stage,
+  latestMessage,
+  recentMessages,
+}) => {
+  const result = await structuredIntentModel.invoke([
+    new SystemMessage(`
+Classify the latest Upnet Internet customer message into exactly one intent.
+Understand English and Roman Urdu. Use the current stage and recent context to
+interpret short answers such as "yes", "no", "haan", "nahi", "paid", and
+"done". Return "unclear" with low confidence when the meaning is ambiguous.
+Return "other" for requests unrelated to Upnet Internet.
+Do not choose a workflow stage and do not infer actions that were not stated.
+
+Allowed intents:
+- greeting, internet_complaint, service_status, other
+- router_red_light, router_no_red_light
+- restart_completed, internet_working, internet_not_working
+- bill_paid, bill_unpaid
+- payment_proof_sent, payment_proof_pending
+- unclear
+    `),
+    new HumanMessage(`
+Current stage: ${stage}
+Recent conversation:
+${formatRecentMessages(recentMessages) || "(none)"}
+
+Latest customer message:
+${latestMessage}
+    `),
+  ]);
+
+  if (!isClassifiedIntent(result)) {
+    throw new Error("Intent classifier returned invalid structured output");
+  }
+
+  return {
+    intent: result.intent as CustomerIntent,
+    confidence: result.confidence as IntentConfidence,
+  };
+};
 
 const graph = new StateGraph(MessagesAnnotation)
   .addNode("agent", async (state) => {

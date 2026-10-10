@@ -3,112 +3,200 @@ import test from "node:test";
 import { AIMessage } from "@langchain/core/messages";
 import { handleAgentMessage } from "./service.js";
 import { resetConversation } from "./conversation.js";
+import type { IntentClassificationInput, IntentClassifier } from "./upnetAgent.js";
+import type { CustomerIntent } from "./workflow.js";
 
-test("keeps local messages in one conversation and advances the workflow", async () => {
-  const conversationId = "local-service-test";
+const reply = async () => ({
+  messages: [new AIMessage("Next step")],
+});
+
+function classifierFor(
+  intent: CustomerIntent,
+): IntentClassifier {
+  return async () => ({
+    intent,
+    confidence: "high",
+  });
+}
+
+test("injects the classifier and passes stage and recent context", async () => {
+  const conversationId = "classifier-context-test";
   resetConversation(conversationId);
-  const seen: string[][] = [];
-
-  const reply = async (messages: import("@langchain/core/messages").BaseMessage[]) => {
-    seen.push(messages.map((message) => String(message.content)));
-    return { messages: [new AIMessage("Please restart your router and confirm when done.")] };
+  const inputs: IntentClassificationInput[] = [];
+  const classify: IntentClassifier = async (input) => {
+    inputs.push(input);
+    return { intent: "internet_complaint", confidence: "high" };
   };
 
-  const first = await handleAgentMessage(
+  const result = await handleAgentMessage(conversationId, "Net nahi chal raha", reply, classify);
+
+  assert.equal(result.stage, "router_check");
+  assert.equal(inputs[0]?.stage, "initial");
+  assert.equal(inputs[0]?.latestMessage, "Net nahi chal raha");
+  assert.deepEqual(inputs[0]?.recentMessages, []);
+  resetConversation(conversationId);
+});
+
+test("keeps the latest customer message separate from assistant context", async () => {
+  const conversationId = "classifier-message-boundaries-test";
+  resetConversation(conversationId);
+  const inputs: IntentClassificationInput[] = [];
+  const classify: IntentClassifier = async (input) => {
+    inputs.push(input);
+    return {
+      intent: inputs.length === 1 ? "internet_complaint" : "router_no_red_light",
+      confidence: "high",
+    };
+  };
+
+  await handleAgentMessage(conversationId, "Internet down hai", reply, classify);
+  await handleAgentMessage(conversationId, "Sab green hain", reply, classify);
+
+  assert.equal(inputs[1]?.latestMessage, "Sab green hain");
+  assert.equal(inputs[1]?.recentMessages.some((message) =>
+    message.content === "Sab green hain"), false);
+  assert.equal(inputs[1]?.recentMessages.some((message) =>
+    message.content === "Next step"), true);
+  resetConversation(conversationId);
+});
+
+test("accepts medium confidence but rejects low confidence without advancing", async () => {
+  const mediumConversationId = "medium-confidence-test";
+  resetConversation(mediumConversationId);
+  const medium = await handleAgentMessage(
+    mediumConversationId,
+    "Internet down",
+    reply,
+    async () => ({ intent: "internet_complaint", confidence: "medium" }),
+  );
+  assert.equal(medium.stage, "router_check");
+  resetConversation(mediumConversationId);
+
+  const lowConversationId = "low-confidence-test";
+  resetConversation(lowConversationId);
+  const low = await handleAgentMessage(
+    lowConversationId,
+    "Internet down",
+    reply,
+    async () => ({ intent: "internet_complaint", confidence: "low" }),
+  );
+  assert.equal(low.stage, "initial");
+  assert.match(low.reply, /did not understand/i);
+  resetConversation(lowConversationId);
+});
+
+test("preserves the stage and continues after a classifier failure", async () => {
+  const conversationId = "classifier-retry-test";
+  resetConversation(conversationId);
+  let attempts = 0;
+  const classify: IntentClassifier = async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      throw new Error("provider unavailable");
+    }
+    return { intent: "internet_complaint", confidence: "high" };
+  };
+
+  const failed = await handleAgentMessage(
     conversationId,
-    "Internet nahi chal raha",
+    "Internet down",
     reply,
+    classify,
   );
-  const second = await handleAgentMessage(conversationId, "All lights green hain", reply);
+  assert.equal(failed.stage, "initial");
 
-  assert.equal(first.stage, "router_check");
-  assert.equal(second.stage, "restart_router");
-  assert.equal(second.reply, "Please restart your router and confirm when done.");
-  assert.equal(seen[1]?.some((message) => message.includes("Internet nahi chal raha")), true);
-  resetConversation(conversationId);
-});
-
-test("supports a Roman Urdu restart follow-up", async () => {
-  const conversationId = "local-restart-test";
-  resetConversation(conversationId);
-  const reply = async () => ({ messages: [new AIMessage("Internet working now?")] });
-
-  await handleAgentMessage(conversationId, "Internet down hai", reply);
-  await handleAgentMessage(conversationId, "All lights green hain", reply);
-  const result = await handleAgentMessage(conversationId, "restart kar diya", reply);
-
-  assert.equal(result.stage, "internet_status");
-  resetConversation(conversationId);
-});
-
-test("moves from restart failure to billing without repeating the status question", async () => {
-  const conversationId = "local-billing-flow-test";
-  resetConversation(conversationId);
-  const instructions: string[] = [];
-  const reply = async (messages: import("@langchain/core/messages").BaseMessage[]) => {
-    instructions.push(String(messages[0]?.content));
-    return { messages: [new AIMessage("Next step")] };
-  };
-
-  await handleAgentMessage(conversationId, "Internet nahi chal raha", reply);
-  await handleAgentMessage(conversationId, "All lights green hain", reply);
-  await handleAgentMessage(conversationId, "Already restarted", reply);
-  await handleAgentMessage(conversationId, "Still not working", reply);
-
-  assert.match(instructions[3] ?? "", /bill is paid/i);
-  assert.doesNotMatch(instructions[3] ?? "", /ask whether the internet is working/i);
-  resetConversation(conversationId);
-});
-
-test("handles paid and unpaid billing outcomes honestly", async () => {
-  const paidConversation = "local-paid-flow-test";
-  const unpaidConversation = "local-unpaid-flow-test";
-  resetConversation(paidConversation);
-  resetConversation(unpaidConversation);
-  const instructions: string[] = [];
-  const reply = async (messages: import("@langchain/core/messages").BaseMessage[]) => {
-    instructions.push(String(messages[0]?.content));
-    return { messages: [new AIMessage("Acknowledged")] };
-  };
-
-  await handleAgentMessage(paidConversation, "Internet down hai", reply);
-  await handleAgentMessage(paidConversation, "All lights green hain", reply);
-  await handleAgentMessage(paidConversation, "Already restarted", reply);
-  await handleAgentMessage(paidConversation, "Still not working", reply);
-  const paid = await handleAgentMessage(paidConversation, "Bill paid hai", reply);
-  const proof = await handleAgentMessage(
-    paidConversation,
-    "Payment screenshot bhej diya",
+  const recovered = await handleAgentMessage(
+    conversationId,
+    "Internet down hai",
     reply,
+    classify,
   );
-  await handleAgentMessage(unpaidConversation, "Internet down hai", reply);
-  await handleAgentMessage(unpaidConversation, "All lights green hain", reply);
-  await handleAgentMessage(unpaidConversation, "Already restarted", reply);
-  await handleAgentMessage(unpaidConversation, "Still not working", reply);
-  const unpaid = await handleAgentMessage(unpaidConversation, "Bill not paid", reply);
+  assert.equal(recovered.stage, "router_check");
+  resetConversation(conversationId);
+});
+
+test("supports Roman Urdu answers through structured intents", async () => {
+  const conversationId = "roman-urdu-classifier-test";
+  resetConversation(conversationId);
+  const intents = [
+    "internet_complaint",
+    "router_no_red_light",
+    "restart_completed",
+    "internet_not_working",
+    "bill_paid",
+    "payment_proof_sent",
+  ] as const;
+  let index = 0;
+  const classify: IntentClassifier = async () => ({
+    intent: intents[index++] ?? "unclear",
+    confidence: "high",
+  });
+
+  await handleAgentMessage(conversationId, "Internet down hai", reply, classify);
+  await handleAgentMessage(conversationId, "Sab green hain", reply, classify);
+  await handleAgentMessage(conversationId, "Restart kar diya", reply, classify);
+  await handleAgentMessage(conversationId, "Abhi bhi nahi chal raha", reply, classify);
+  const paid = await handleAgentMessage(conversationId, "Bill paid hai", reply, classify);
+  const proof = await handleAgentMessage(conversationId, "Screenshot bhej diya", reply, classify);
 
   assert.equal(paid.stage, "payment_proof");
   assert.equal(proof.stage, "ready_for_ticket");
-  assert.equal(unpaid.stage, "payment_required");
-  const unpaidInstruction = instructions.at(-1) ?? "";
-  assert.match(unpaidInstruction, /official UpNet payment method/i);
-  assert.match(unpaidInstruction, /contact support again after payment/i);
-  assert.doesNotMatch(
-    unpaidInstruction,
-    /ask (the customer )?(to )?(send|provide).*proof/i,
+  resetConversation(conversationId);
+});
+
+test("returns a clarification and does not advance for ambiguity", async () => {
+  const conversationId = "ambiguous-classifier-test";
+  resetConversation(conversationId);
+  const result = await handleAgentMessage(
+    conversationId,
+    "I don't know",
+    reply,
+    async () => ({ intent: "unclear", confidence: "low" }),
   );
-  assert.match(
-    unpaidInstruction,
-    /Do not say that the unpaid bill definitely caused the internet issue/i,
+
+  assert.equal(result.stage, "initial");
+  assert.match(result.reply, /did not understand/i);
+  resetConversation(conversationId);
+});
+
+test("returns a safe retry message for classifier errors and invalid output", async () => {
+  for (const [conversationId, classify] of [
+    [
+      "classifier-error-test",
+      async () => {
+        throw new Error("provider unavailable");
+      },
+    ],
+    [
+      "classifier-invalid-test",
+      async () => ({ intent: "bill_paid", confidence: "invalid" } as never),
+    ],
+  ] as const) {
+    resetConversation(conversationId);
+    const result = await handleAgentMessage(conversationId, "yes", reply, classify);
+    assert.equal(result.stage, "initial");
+    assert.match(result.reply, /did not understand/i);
+    resetConversation(conversationId);
+  }
+});
+
+test("prevents an illegal stage transition", async () => {
+  const conversationId = "illegal-transition-test";
+  resetConversation(conversationId);
+  await handleAgentMessage(
+    conversationId,
+    "Internet down",
+    reply,
+    classifierFor("internet_complaint"),
   );
-  assert.match(
-    unpaidInstruction,
-    /or that all troubleshooting must stop/i,
+  const result = await handleAgentMessage(
+    conversationId,
+    "Hello",
+    reply,
+    classifierFor("greeting"),
   );
-  assert.match(
-    instructions.find((instruction) => instruction.includes("not available in this chat yet")) ?? "",
-    /not available in this chat yet/i,
-  );
-  resetConversation(paidConversation);
-  resetConversation(unpaidConversation);
+
+  assert.equal(result.stage, "router_check");
+  assert.match(result.reply, /did not understand/i);
+  resetConversation(conversationId);
 });
