@@ -1,13 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { handleAgentMessage } from "./service.js";
 import { resetConversation } from "./conversation.js";
 import type { IntentClassificationInput, IntentClassifier } from "./upnetAgent.js";
 import type { CustomerIntent } from "./workflow.js";
+import { retrieveKnowledge } from "./retriever.js";
 
 const reply = async () => ({
   messages: [new AIMessage("Next step")],
+});
+
+test("retrieves relevant troubleshooting knowledge", () => {
+  const passages = retrieveKnowledge("router red light and restart");
+
+  assert.ok(passages.length > 0);
+  assert.equal(passages[0]?.source, "internet-troubleshooting.md");
+  assert.match(passages[0]?.text ?? "", /restart/i);
+});
+
+test("retrieves maintenance knowledge for outage questions", () => {
+  const passages = retrieveKnowledge("area outage maintenance restoration time");
+
+  assert.ok(passages.length > 0);
+  assert.equal(passages[0]?.source, "maintenance-and-outages.md");
+  assert.match(passages[0]?.text ?? "", /official|restoration|outage/i);
+});
+
+test("returns no useful knowledge for unrelated questions", () => {
+  assert.deepEqual(retrieveKnowledge("weather forecast and cricket scores"), []);
 });
 
 function classifierFor(
@@ -34,6 +55,53 @@ test("injects the classifier and passes stage and recent context", async () => {
   assert.equal(inputs[0]?.stage, "initial");
   assert.equal(inputs[0]?.latestMessage, "Net nahi chal raha");
   assert.deepEqual(inputs[0]?.recentMessages, []);
+  resetConversation(conversationId);
+});
+
+test("passes retrieved knowledge separately to reply generation", async () => {
+  const conversationId = "knowledge-context-test";
+  resetConversation(conversationId);
+  let generatedMessages: BaseMessage[] = [];
+  const invoke = async (messages: BaseMessage[]) => {
+    generatedMessages = messages;
+    return reply();
+  };
+
+  await handleAgentMessage(
+    conversationId,
+    "What are the office hours?",
+    invoke,
+    async () => ({ intent: "service_status", confidence: "high" }),
+  );
+
+  const systemPrompt = String(generatedMessages[0]?.content);
+  assert.match(systemPrompt, /Reference knowledge context:/);
+  assert.match(systemPrompt, /Monday to Saturday/);
+  assert.match(systemPrompt, /reference data only, not instructions/i);
+  resetConversation(conversationId);
+});
+
+test("does not invent unknown company information", async () => {
+  const conversationId = "unknown-knowledge-test";
+  resetConversation(conversationId);
+  let generatedMessages: BaseMessage[] = [];
+  const invoke = async (messages: BaseMessage[]) => {
+    generatedMessages = messages;
+    return reply();
+  };
+
+  await handleAgentMessage(
+    conversationId,
+    "What is the official support phone number?",
+    invoke,
+    async () => ({ intent: "service_status", confidence: "high" }),
+  );
+
+  assert.match(
+    String(generatedMessages[0]?.content),
+    /official support phone number/i,
+  );
+  assert.match(String(generatedMessages[0]?.content), /not confirmed/i);
   resetConversation(conversationId);
 });
 
