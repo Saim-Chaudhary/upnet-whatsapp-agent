@@ -1,0 +1,138 @@
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
+@import "@fontsource/hanken-grotesk/400.css";
+@import "@fontsource/hanken-grotesk/500.css";
+@import "@fontsource/hanken-grotesk/600.css";
+@import "tailwindcss";
+@source "./";
+
+@theme {
+  --font-display: "Instrument Serif", Georgia, serif;
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #e8e5de;
+  --color-surface: #fdfcfa;
+  --color-surface-soft: #f0ede7;
+  --color-ink: #131d33;
+  --color-muted: #625e56;
+  --color-border: #d4d0c4;
+  --color-border-strong: #bcb6aa;
+
+  --color-navy: #101c33;
+  --color-navy-2: #172a4d;
+  --color-navy-3: #284676;
+  --color-navy-soft: #e1e7f1;
+
+  --color-crimson: #b3122c;
+  --color-crimson-bright: #ff5c75;
+  --color-crimson-dark: #8f0e23;
+  --color-crimson-soft: #f7dfe2;
+
+  --ease-editorial: cubic-bezier(.16, 1, .3, 1);
+}
+
+@layer base {
+  :root {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    font-synthesis: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    line-height: 1.5;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 3px solid #284676;
+    outline-offset: 3px;
+  }
+
+  ::selection {
+    background: #f0c6cd;
+    color: var(--color-ink);
+  }
+}
+
+@layer components {
+  .app-grid {
+    background-image: linear-gradient(
+      to right,
+      rgba(19, 29, 51, 0.035) 1px,
+      transparent 1px
+    );
+    background-size: 64px 100%;
+  }
+
+  /* Desktop: sidebar column + content column */
+  @media (min-width: 1024px) {
+    .app-grid {
+      display: grid;
+      grid-template-columns: 18rem minmax(0, 1fr);
+      align-items: start;
+    }
+  }
+
+  .animate-in {
+    animation: rise 0.45s var(--ease-editorial) both;
+  }
+
+  .drawer-in {
+    animation: drawer 0.42s var(--ease-editorial) both;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes drawer {
+    from {
+      opacity: 0;
+      transform: translateX(28px);
+    }
+
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

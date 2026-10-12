@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildApp } from "./app.js";
+import { InMemoryConversationStore } from "./agent/conversation.js";
 
 test("local chat validates messages and can reset a conversation", async () => {
-  const app = buildApp();
+  const app = buildApp({
+    conversation: new InMemoryConversationStore(),
+  });
   await app.ready();
 
   const invalid = await app.inject({

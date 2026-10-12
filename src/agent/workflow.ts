@@ -1,3 +1,4 @@
+
 import { ConversationStage } from "./conversation.js";
 
 export type WorkflowDecision = {
@@ -53,6 +54,7 @@ export function isClassifiedIntent(value: unknown): value is ClassifiedIntent {
   }
 
   const candidate = value as { intent?: unknown; confidence?: unknown };
+
   return (
     typeof candidate.intent === "string" &&
     intents.has(candidate.intent as CustomerIntent) &&
@@ -66,7 +68,15 @@ export function isIntentAllowedForStage(
   intent: CustomerIntent,
 ): boolean {
   const allowed: Record<ConversationStage, CustomerIntent[]> = {
-    initial: ["greeting", "internet_complaint", "service_status", "other", "unclear"],
+    initial: [
+      "greeting",
+      "internet_complaint",
+      "internet_not_working",
+      "service_status",
+      "internet_working",
+      "other",
+      "unclear",
+    ],
     router_check: ["router_red_light", "router_no_red_light", "unclear"],
     restart_router: ["restart_completed", "unclear"],
     internet_status: ["internet_working", "internet_not_working", "unclear"],
@@ -115,7 +125,10 @@ export function decideNextStep(
       };
     }
 
-    if (intent !== "internet_complaint") {
+    if (
+      intent !== "internet_complaint" &&
+      intent !== "internet_not_working"
+    ) {
       return {
         nextStage: "initial",
         instruction:
@@ -238,7 +251,7 @@ export function decideNextStep(
     return {
       nextStage: "ready_for_ticket",
       instruction:
-        "Acknowledge the customer's payment-proof message briefly. Do not claim that payment was verified, a ticket was created, or a complaint was forwarded. Explain that those actions are not available in this chat yet.",
+        "Acknowledge the customer's payment-proof message briefly. Do not claim that payment was verified, a ticket was created, or the complaint was forwarded. Explain that those actions are not available in this chat yet.",
     };
   }
 

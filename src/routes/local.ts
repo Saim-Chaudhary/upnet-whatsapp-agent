@@ -1,13 +1,16 @@
 import { FastifyInstance } from "fastify";
 import { handleAgentMessage } from "../agent/service.js";
-import { resetConversation } from "../agent/conversation.js";
+import { AgentStores } from "../agent/persistence.js";
 
 type LocalChatRequest = {
   Params: { conversationId: string };
-  Body: { message?: unknown };
+  Body: { message?: unknown; requestId?: unknown; customerPhone?: unknown };
 };
 
-export default async function localRoutes(app: FastifyInstance) {
+export default async function localRoutes(
+  app: FastifyInstance,
+  options: { stores: AgentStores },
+) {
   app.post<LocalChatRequest>(
     "/local/chat/:conversationId",
     async (request, reply) => {
@@ -19,9 +22,25 @@ export default async function localRoutes(app: FastifyInstance) {
         });
       }
 
+      const stores = options.stores;
       return handleAgentMessage(
         request.params.conversationId,
         message.trim(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          ...(typeof request.body?.requestId === "string" &&
+          request.body.requestId.trim()
+            ? { requestId: request.body.requestId.trim() }
+            : {}),
+          ...(typeof request.body?.customerPhone === "string" &&
+          request.body.customerPhone.trim()
+            ? { customerPhone: request.body.customerPhone.trim() }
+            : {}),
+        },
+        stores.conversation,
       );
     },
   );
@@ -29,7 +48,9 @@ export default async function localRoutes(app: FastifyInstance) {
   app.delete<{ Params: { conversationId: string } }>(
     "/local/chat/:conversationId",
     async (request) => ({
-      reset: resetConversation(request.params.conversationId),
+      reset: await options.stores.conversation.reset(
+        request.params.conversationId,
+      ),
       conversationId: request.params.conversationId,
     }),
   );
